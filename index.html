@@ -82,10 +82,11 @@
                     </div>
                     <div id="reqNoDiv" style="display: none;">
                         <div class="mb-3">
-                            <label for="reqNo" class="form-label">Requisition No</label>
-                            <input type="text" class="form-control" id="reqNo" required>
+                            <label for="reqNo" class="form-label">Requisition</label>
+                            <select class="form-control" id="reqNo" required>
+                                <option value="">Select Pending Requisition</option>
+                            </select>
                         </div>
-                        <button type="button" id="fetchReq" class="btn btn-secondary mb-3">Fetch Requisition</button>
                     </div>
                     <div class="mb-3">
                         <label for="issueItem" class="form-label">Item</label>
@@ -139,6 +140,15 @@
                     <div class="mb-3">
                         <label for="approvedBy" class="form-label">Approved By</label>
                         <input type="text" class="form-control" id="approvedBy" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="reqStatus" class="form-label">Status</label>
+                        <select class="form-control" id="reqStatus" required>
+                            <option value="Pending" selected>Pending</option>
+                            <option value="Approved">Approved</option>
+                            <option value="Rejected">Rejected</option>
+                            <option value="Completed">Completed</option>
+                        </select>
                     </div>
                     <button type="submit" class="btn btn-primary">Submit Requisition</button>
                 </form>
@@ -205,7 +215,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxOYzTrGSkdGCWcCvFhCF9AIUfM_Wj3wbYZ1rIHsppX8fMTQDOq48pnj8KfU2cDnoaY/exec'; // Replace with your deployed Google Apps Script Web App URL
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyNL_dOLuh7L6-l9JdSL8ymHinv63C_AEI2QYY3tDkmYi-x5OygAO8jabBL6XljxHVq/exec'; // Replace with your deployed Google Apps Script Web App URL
 
         // Helper to send POST requests
         async function sendPost(action, data) {
@@ -239,6 +249,47 @@
             });
         });
 
+        // Populate requisition dropdown when Issue tab is shown or checkbox is checked
+        document.getElementById('issue-tab').addEventListener('shown.bs.tab', async () => {
+            if (document.getElementById('asRequisition').checked) {
+                await populateRequisitionDropdown();
+            }
+        });
+
+        document.getElementById('asRequisition').addEventListener('change', async (e) => {
+            const reqNoDiv = document.getElementById('reqNoDiv');
+            reqNoDiv.style.display = e.target.checked ? 'block' : 'none';
+            if (e.target.checked) {
+                await populateRequisitionDropdown();
+            }
+        });
+
+        async function populateRequisitionDropdown() {
+            const requisitions = await getData('getPendingRequisitions');
+            const reqNoSelect = document.getElementById('reqNo');
+            reqNoSelect.innerHTML = '<option value="">Select Pending Requisition</option>';
+            requisitions.forEach(req => {
+                const option = document.createElement('option');
+                option.value = req.reqNo;
+                option.textContent = `ReqNo ${req.reqNo}: ${req.item} (Qty: ${req.quantity}, Requested By: ${req.requestedBy})`;
+                option.dataset.item = req.item;
+                option.dataset.quantity = req.quantity;
+                reqNoSelect.appendChild(option);
+            });
+        }
+
+        document.getElementById('reqNo').addEventListener('change', () => {
+            const reqNoSelect = document.getElementById('reqNo');
+            const selectedOption = reqNoSelect.options[reqNoSelect.selectedIndex];
+            if (selectedOption.value) {
+                document.getElementById('issueItem').value = selectedOption.dataset.item;
+                document.getElementById('issueQuantity').value = selectedOption.dataset.quantity;
+            } else {
+                document.getElementById('issueItem').value = '';
+                document.getElementById('issueQuantity').value = '';
+            }
+        });
+
         // Purchase Form
         document.getElementById('purchaseForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -255,25 +306,6 @@
         });
 
         // Issue Form
-        document.getElementById('asRequisition').addEventListener('change', (e) => {
-            document.getElementById('reqNoDiv').style.display = e.target.checked ? 'block' : 'none';
-        });
-
-        document.getElementById('fetchReq').addEventListener('click', async () => {
-            const reqNo = document.getElementById('reqNo').value;
-            if (reqNo) {
-                const data = await getData('getRequisition', { reqNo });
-                if (data.error) {
-                    alert('Requisition not found');
-                } else {
-                    document.getElementById('issueItem').value = data.item;
-                    document.getElementById('issueQuantity').value = data.quantity;
-                }
-            } else {
-                alert('Enter Requisition No');
-            }
-        });
-
         document.getElementById('issueForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const item = document.getElementById('issueItem').value;
@@ -285,7 +317,14 @@
             const indentNo = document.getElementById('indentNo').value;
             const reqNo = document.getElementById('asRequisition').checked ? document.getElementById('reqNo').value : '';
             const result = await sendPost('issueStock', { item, quantity, issuedTo, issuedBy, issueApprovedBy, diaryNo, indentNo, reqNo });
-            document.getElementById('issueMessage').innerHTML = result.success ? '<div class="alert alert-success">Stock issued!</div>' : `<div class="alert alert-danger">${result.message || 'Error issuing stock.'}</div>`;
+            if (result.success) {
+                document.getElementById('issueMessage').innerHTML = '<div class="alert alert-success">Stock issued!</div>';
+                if (document.getElementById('asRequisition').checked) {
+                    await populateRequisitionDropdown(); // Refresh dropdown after issuing
+                }
+            } else {
+                document.getElementById('issueMessage').innerHTML = `<div class="alert alert-danger">${result.message || 'Error issuing stock.'}</div>`;
+            }
         });
 
         // Requisition Form
@@ -295,7 +334,8 @@
             const quantity = parseInt(document.getElementById('reqQuantity').value);
             const requestedBy = document.getElementById('requestedBy').value;
             const approvedBy = document.getElementById('approvedBy').value;
-            const result = await sendPost('addRequisition', { item, quantity, requestedBy, approvedBy });
+            const status = document.getElementById('reqStatus').value;
+            const result = await sendPost('addRequisition', { item, quantity, requestedBy, approvedBy, status });
             document.getElementById('requisitionMessage').innerHTML = result.success ? '<div class="alert alert-success">Requisition added!</div>' : '<div class="alert alert-danger">Error adding requisition.</div>';
         });
 
