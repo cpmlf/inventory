@@ -76,6 +76,17 @@
             <div class="tab-pane fade" id="issue" role="tabpanel">
                 <h2>Issue Stock to Officials</h2>
                 <form id="issueForm">
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="asRequisition">
+                        <label class="form-check-label" for="asRequisition">Issue as per Requisition</label>
+                    </div>
+                    <div id="reqNoDiv" style="display: none;">
+                        <div class="mb-3">
+                            <label for="reqNo" class="form-label">Requisition No</label>
+                            <input type="text" class="form-control" id="reqNo" required>
+                        </div>
+                        <button type="button" id="fetchReq" class="btn btn-secondary mb-3">Fetch Requisition</button>
+                    </div>
                     <div class="mb-3">
                         <label for="issueItem" class="form-label">Item</label>
                         <input type="text" class="form-control" id="issueItem" required>
@@ -145,6 +156,30 @@
                     <table class="table table-bordered" id="issuesTable"></table>
                     <h3>Requisitions</h3>
                     <table class="table table-bordered" id="requisitionsTable"></table>
+                    <h4>Update Requisition Status</h4>
+                    <form id="updateStatusForm" class="mb-3">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <label for="requisitionRow" class="form-label">Requisition</label>
+                                <select class="form-control" id="requisitionRow" required>
+                                    <option value="">Select Requisition</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label for="newStatus" class="form-label">New Status</label>
+                                <select class="form-control" id="newStatus" required>
+                                    <option value="Pending">Pending</option>
+                                    <option value="Approved">Approved</option>
+                                    <option value="Rejected">Rejected</option>
+                                    <option value="Completed">Completed</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 align-self-end">
+                                <button type="submit" class="btn btn-primary">Update Status</button>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="statusMessage" class="mt-3"></div>
                     <h3>Current Stock</h3>
                     <table class="table table-bordered" id="stockTable"></table>
                 </div>
@@ -153,6 +188,12 @@
             <!-- Reports -->
             <div class="tab-pane fade" id="reports" role="tabpanel">
                 <h2>Reports</h2>
+                <div class="mb-3">
+                    <label for="reportItem" class="form-label">Select Item</label>
+                    <select class="form-control" id="reportItem">
+                        <option value="">Show All Items</option>
+                    </select>
+                </div>
                 <button id="showReportsBtn" class="btn btn-primary mb-3">Generate Reports</button>
                 <h3>Item-Wise Stock Report</h3>
                 <canvas id="itemChart" width="400" height="200"></canvas>
@@ -164,7 +205,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbykL_AGb3bIVeV4ysdHgfKt6VkKh3nWwNTBYF8lMbB1e_LkgyfocYEaSKqpxhfT-7XQJg/exec'; // Replace with your deployed Google Apps Script Web App URL
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxyY5xqJH35Su_iqiVCidwgD0ilHp7-HV9hiX5-12vzNhHtFE5ru_obSMjTOVzfN4EL/exec'; // Replace with your deployed Google Apps Script Web App URL
 
         // Helper to send POST requests
         async function sendPost(action, data) {
@@ -176,10 +217,27 @@
         }
 
         // Helper to get data
-        async function getData(action) {
-            const response = await fetch(`${SCRIPT_URL}?action=${action}`);
+        async function getData(action, params = {}) {
+            let url = `${SCRIPT_URL}?action=${action}`;
+            for (let key in params) {
+                url += `&${key}=${encodeURIComponent(params[key])}`;
+            }
+            const response = await fetch(url);
             return await response.json();
         }
+
+        // Populate item dropdown when Reports tab is shown
+        document.getElementById('reports-tab').addEventListener('shown.bs.tab', async () => {
+            const items = await getData('getItems');
+            const reportItemSelect = document.getElementById('reportItem');
+            reportItemSelect.innerHTML = '<option value="">Show All Items</option>';
+            items.forEach(item => {
+                const option = document.createElement('option');
+                option.value = item;
+                option.textContent = item;
+                reportItemSelect.appendChild(option);
+            });
+        });
 
         // Purchase Form
         document.getElementById('purchaseForm').addEventListener('submit', async (e) => {
@@ -197,6 +255,25 @@
         });
 
         // Issue Form
+        document.getElementById('asRequisition').addEventListener('change', (e) => {
+            document.getElementById('reqNoDiv').style.display = e.target.checked ? 'block' : 'none';
+        });
+
+        document.getElementById('fetchReq').addEventListener('click', async () => {
+            const reqNo = document.getElementById('reqNo').value;
+            if (reqNo) {
+                const data = await getData('getRequisition', { reqNo });
+                if (data.error) {
+                    alert('Requisition not found');
+                } else {
+                    document.getElementById('issueItem').value = data.item;
+                    document.getElementById('issueQuantity').value = data.quantity;
+                }
+            } else {
+                alert('Enter Requisition No');
+            }
+        });
+
         document.getElementById('issueForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const item = document.getElementById('issueItem').value;
@@ -206,7 +283,8 @@
             const issueApprovedBy = document.getElementById('issueApprovedBy').value;
             const diaryNo = document.getElementById('diaryNo').value;
             const indentNo = document.getElementById('indentNo').value;
-            const result = await sendPost('issueStock', { item, quantity, issuedTo, issuedBy, issueApprovedBy, diaryNo, indentNo });
+            const reqNo = document.getElementById('asRequisition').checked ? document.getElementById('reqNo').value : '';
+            const result = await sendPost('issueStock', { item, quantity, issuedTo, issuedBy, issueApprovedBy, diaryNo, indentNo, reqNo });
             document.getElementById('issueMessage').innerHTML = result.success ? '<div class="alert alert-success">Stock issued!</div>' : `<div class="alert alert-danger">${result.message || 'Error issuing stock.'}</div>`;
         });
 
@@ -233,11 +311,31 @@
             renderTable('issuesTable', ['Date', 'Item', 'Quantity', 'Issued To', 'Issued By', 'Approved By', 'Diary No', 'Indent No'], allData.issues);
 
             // Render Requisitions Table
-            renderTable('requisitionsTable', ['Date', 'Item', 'Quantity', 'Requested By', 'Approved By', 'Status'], allData.requisitions);
+            renderTable('requisitionsTable', ['Requisition No', 'Date', 'Item', 'Quantity', 'Requested By', 'Approved By', 'Status'], allData.requisitions);
+
+            // Populate Status Update Dropdown
+            const requisitionRowSelect = document.getElementById('requisitionRow');
+            requisitionRowSelect.innerHTML = '<option value="">Select Requisition</option>';
+            allData.requisitions.slice(1).forEach((row, index) => {
+                const option = document.createElement('option');
+                option.value = index + 2; // Row number in sheet (1-based, +1 for header)
+                option.textContent = `ReqNo ${row[0]}: ${row[2]} (Qty: ${row[3]}, Requested By: ${row[4]})`;
+                requisitionRowSelect.appendChild(option);
+            });
 
             // Render Stock Table
             const stockRows = Object.entries(stock).map(([item, qty]) => [item, qty]);
             renderStockTable('stockTable', ['Item', 'Available Quantity'], stockRows);
+        });
+
+        // Update Requisition Status
+        document.getElementById('updateStatusForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const row = parseInt(document.getElementById('requisitionRow').value);
+            const newStatus = document.getElementById('newStatus').value;
+            const result = await sendPost('updateRequisitionStatus', { row, newStatus });
+            document.getElementById('statusMessage').innerHTML = result.success ? '<div class="alert alert-success">Status updated!</div>' : `<div class="alert alert-danger">${result.message || 'Error updating status.'}</div>`;
+            document.getElementById('showDataBtn').click(); // Refresh data
         });
 
         function renderTable(tableId, headers, data) {
@@ -302,9 +400,10 @@
         // Reports
         let itemChart, dateChart;
         document.getElementById('showReportsBtn').addEventListener('click', async () => {
-            const reportData = await getData('getReports');
+            const selectedItem = document.getElementById('reportItem').value;
+            const reportData = await getData('getReports', { item: selectedItem });
 
-            // Item-Wise Stock Report: Bar chart for items with issued and current stock
+            // Item-Wise Stock Report
             const ctxItem = document.getElementById('itemChart').getContext('2d');
             if (itemChart) itemChart.destroy();
             itemChart = new Chart(ctxItem, {
@@ -318,11 +417,11 @@
                 },
                 options: { 
                     scales: { y: { beginAtZero: true, title: { display: true, text: 'Quantity' } } },
-                    plugins: { title: { display: true, text: 'Item-Wise Current Stock and Issued Quantity' } }
+                    plugins: { title: { display: true, text: selectedItem ? `Stock Report for ${selectedItem}` : 'Item-Wise Stock Report' } }
                 }
             });
 
-            // Date-Wise Issued Quantity: Bar chart for issued quantity date-wise
+            // Date-Wise Issued Quantity
             const ctxDate = document.getElementById('dateChart').getContext('2d');
             if (dateChart) dateChart.destroy();
             dateChart = new Chart(ctxDate, {
@@ -333,7 +432,7 @@
                 },
                 options: { 
                     scales: { y: { beginAtZero: true, title: { display: true, text: 'Quantity' } } },
-                    plugins: { title: { display: true, text: 'Date-Wise Issued Quantity' } }
+                    plugins: { title: { display: true, text: selectedItem ? `Date-Wise Issued Quantity for ${selectedItem}` : 'Date-Wise Issued Quantity' } }
                 }
             });
         });
